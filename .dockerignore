@@ -1,0 +1,66 @@
+# Development environment
+.venv/
+.git/
+__pycache__/
+
+# Project documentation
+ARCHITECTURE.md
+README.md
+
+# Docker files
+Dockerfile
+.dockerignore
+compose.yml
+
+# Environment and configuration
+.env
+.env.*
+!.env.example
+
+# API documentation
+librechat-code-interpreter-openapi.json
+
+# Editor
+.vscode/
+.idea/
+
+# Python
+*.py[cod]
+*$py.class
+*.so
+.Python
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+.hypothesis/
+.mypy_cache/
+
+# IDE
+*.swp
+*.swo
+
+# Git
+.gitignore
+
+# Docker
+.dockerignore
+
+# Project specific
+*.log
+.DS_Store
+node_modules/
+
+# Build and dist
+dist/
+build/
+project
+*.egg-info/
+logs
+config
+uploads
+
+# Cache
+.ruff_cache/
+.uv/ 

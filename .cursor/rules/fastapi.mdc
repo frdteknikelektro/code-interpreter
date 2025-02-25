@@ -1,0 +1,11 @@
+---
+description: Guidelines for FastAPI development and API design
+globs: "app/api/**/*.py"
+alwaysApply: false
+---
+- Use Pydantic models for request/response validation
+- Implement proper error handling and status codes
+- Keep route handlers clean and delegate business logic to services
+- Use dependency injection for services and database connections
+- Document API endpoints with OpenAPI/Swagger comments
+- API endpoints use a global prefix of '/v1'

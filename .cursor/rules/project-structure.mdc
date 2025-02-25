@@ -1,0 +1,10 @@
+---
+description: Maintains consistent project organization and architecture
+globs: "app/**/*.py"
+alwaysApply: false
+---
+- Keep models in app/models/
+- Business logic belongs in app/services/
+- Shared functionality in app/shared/
+- Utility functions in app/utils/
+- API routes in app/api/

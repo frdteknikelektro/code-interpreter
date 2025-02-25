@@ -1,0 +1,8 @@
+---
+description: Standards for managing configuration and environment variables
+globs: "*.yml,*.toml,.env.example"
+alwaysApply: false
+---
+- Document all configuration options
+- Use environment variables (.env file) for sensitive data
+- Keep configuration files organized and well-commented

@@ -1,0 +1,21 @@
+# System files
+.DS_Store
+
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+config
+uploads
+.pytest_cache
+logs
+project
+
+# Virtual environments
+.venv
+
+# Security related ignores
+.env

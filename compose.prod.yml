@@ -1,0 +1,22 @@
+services:
+  code-interpreter:
+    image: code-interpreter:latest
+    container_name: code-interpreter
+    restart: unless-stopped
+    privileged: true
+    env_file:
+      - .env
+    environment:
+      - HOST_PATH=${PWD}
+    ports:
+      - '${PORT:-8000}:${PORT:-8000}'
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:${PORT:-8000}/health']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    volumes:
+      - ${CONFIG_PATH:-./config}:/app/config
+      - ${FILE_UPLOAD_PATH:-./uploads}:/app/uploads
+      - /var/run/docker.sock:/var/run/docker.sock

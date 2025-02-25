@@ -1,0 +1,149 @@
+---
+description: Librechat specific endpoints
+globs: "app/api/librechat.py"
+alwaysApply: false
+---
+## Base Path
+
+All endpoints are prefixed with `/v1/librechat`
+
+## Endpoints
+
+### 1. Execute Code
+**Endpoint:** `POST /exec`
+
+**Description:** Execute Python code in a secure sandbox environment
+
+**Request Body:**
+```json
+{
+    "lang": "py",  // Only Python is supported
+    "code": "string",  // The code to execute
+    "files": [  // Optional
+        {
+            "id": "string",
+            "name": "string",
+            "size": "number"  // Optional, defaults to 0
+        }
+    ]
+}
+```
+
+**Response:**
+```json
+{
+    "session_id": "string",
+    "stdout": "string",
+    "stderr": "string",
+    "files": [  // Optional
+        {
+            "id": "string",
+            "name": "string",
+            "size": "number",
+            "content_type": "string"
+        }
+    ]
+}
+```
+
+**Error Responses:**
+- `400`: Invalid request (unsupported language or invalid JSON)
+- `401`: Unauthorized
+- `422`: Validation error
+- `500`: Internal server error
+- `503`: Service unavailable
+
+### 2. Upload Files
+**Endpoint:** `POST /upload`
+
+**Request:**
+- Content-Type: `multipart/form-data`
+
+**Parameters:**
+- `file`: File (required)
+- `entity_id`: String (optional, form field)
+
+**Headers:**
+- `user-id`: String
+- `x-api-key`: String
+- `user-agent`: String
+
+**Response:**
+```json
+{
+    "message": "success",
+    "session_id": "string",
+    "files": [
+        {
+            "fileId": "string",
+            "filename": "string"
+        }
+    ]
+}
+```
+
+**Error Responses:**
+- `400`: Bad request
+- `413`: File size too large
+
+### 3. Download File
+**Endpoint:** `GET /download/{session_id}/{file_id}`
+
+**Path Parameters:**
+- `session_id`: String (required)
+- `file_id`: String (required)
+
+**Response:**
+- Streaming response of the file content
+
+**Error Responses:**
+- `404`: File not found
+
+### 4. List Files
+**Endpoint:** `GET /files/{session_id}`
+
+**Path Parameters:**
+- `session_id`: String (required)
+
+**Query Parameters:**
+- `detail`: String (optional)
+  - When set to "summary", returns minimal file information
+
+**Response:**
+```json
+[
+    {
+        "name": "session_id/fileId",
+        "lastModified": "ISO-8601 timestamp",
+        "type": "string",  // Only included if detail != "summary"
+        "size": "number"   // Only included if detail != "summary"
+    }
+]
+```
+
+**Error Responses:**
+- `400`: Bad request
+
+### 5. Delete File
+**Endpoint:** `DELETE /files/{session_id}/{file_id}`
+
+**Path Parameters:**
+- `session_id`: String (required)
+- `file_id`: String (required)
+
+**Response:**
+```json
+{
+    "message": "success"
+}
+```
+
+**Error Responses:**
+- `404`: File not found
+
+## Notes
+
+1. All file operations are session-based, requiring a valid session ID
+2. Maximum file upload size is configured in the application settings
+3. Only Python code execution is currently supported
+4. All endpoints may return standard HTTP error codes for common failure cases

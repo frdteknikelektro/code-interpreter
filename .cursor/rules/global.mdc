@@ -1,0 +1,9 @@
+---
+description: Global project rules
+globs: 
+alwaysApply: true
+---
+- Project uses uv and pyproject.toml for deps management
+- Install deps with uv sync --all-extras
+- After making changes, run `pytest tests -v` or for specific test `pytest tests/{test} -v`
+- After making changes, verify that [endpoints.py](mdc:app/api/endpoints.py) still follows [librechat-code-interpreter-openapi.json](mdc:project/librechat-code-interpreter-openapi.json)
