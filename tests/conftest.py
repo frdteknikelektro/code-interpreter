@@ -1,5 +1,8 @@
 import os
 from pathlib import Path
+
+from app.shared.const import CONFIG_PATH
+
 os.environ["HOST_PATH"] = str(Path.cwd())
 
 import pytest
@@ -10,15 +13,17 @@ from loguru import logger
 
 
 logger.remove()
-logger.add("logs/test.log")
-
+logs_path = Path("logs/test.log")
+logs_path.parent.mkdir(exist_ok=True, parents=True)
+# logs_path.unlink(missing_ok=True)
+logger.add(logs_path)
 
 
 @pytest.fixture(autouse=True)
 async def init_db():
     """Initialize the database before running tests."""
     # Ensure the data directory exists
-    Path("data").mkdir(exist_ok=True)
+    Path(CONFIG_PATH).mkdir(exist_ok=True, parents=True)
 
     # Initialize the database
     await db_manager.initialize()
@@ -27,7 +32,7 @@ async def init_db():
 
     # Cleanup after tests
     try:
-        Path("data/files.db").unlink(missing_ok=True)
+        (CONFIG_PATH / "test_database.db").unlink(missing_ok=True)
     except Exception as e:
         print(f"Failed to cleanup database: {e}")
 

@@ -12,7 +12,7 @@ class Settings(BaseSettings):
 
     # Configuration
     HOST_PATH: Path = (
-        None  # This is used to fully qualify relative paths for Docker code execution container volume mounts
+        "."  # This is used to fully qualify relative paths for Docker code execution container volume mounts
     )
     HOST_CONFIG_PATH: Path = Path("config")  # Base directory for configuration files
     LOG_LEVEL: str = "INFO"  # Log level for logging
@@ -32,7 +32,42 @@ class Settings(BaseSettings):
 
     # File management
     FILE_MAX_UPLOAD_SIZE: int = 10 * 1024 * 1024  # 10MB
-    FILE_ALLOWED_EXTENSIONS: Set[str] = {"py", "txt", "json", "csv", "ipynb", "xlsx", "yml", "yaml", "md"}
+    FILE_ALLOWED_EXTENSIONS: Set[str] = {
+        # Programming languages
+        "py",
+        "c",
+        "cpp",
+        "java",
+        "php",
+        "rb",
+        "js",
+        "ts",
+        # Documents
+        "txt",
+        "md",
+        "html",
+        "css",
+        "tex",
+        "json",
+        "csv",
+        "xml",
+        "docx",
+        "xlsx",
+        "pptx",
+        "pdf",
+        # Data formats
+        "ipynb",
+        "yml",
+        "yaml",
+        # Archives
+        "zip",
+        "tar",
+        # Images
+        "jpg",
+        "jpeg",
+        "png",
+        "gif",
+    }
 
     HOST_FILE_UPLOAD_PATH: Path = Path("uploads")  # Base directory for uploaded files
 
@@ -48,6 +83,8 @@ class Settings(BaseSettings):
     # File cleanup settings
     CLEANUP_RUN_INTERVAL: int = 3600  # How often to run the cleanup in seconds
     CLEANUP_FILE_MAX_AGE: int = 86400  # How old files can be before they are deleted in seconds
+
+    PYTHON_CONTAINER_IMAGE: str = "jupyter/scipy-notebook:latest"
 
 
 @lru_cache()

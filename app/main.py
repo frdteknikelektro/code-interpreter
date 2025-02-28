@@ -11,6 +11,7 @@ from .api.container import router as docker_router
 from .services.database import db_manager
 from .services.cleanup import cleanup_service
 from .utils.logging import setup_logging, RequestLoggingMiddleware
+from .services.docker_executor import docker_executor
 
 
 @asynccontextmanager
@@ -23,6 +24,9 @@ async def lifespan(app: FastAPI):
     # Initialize database
     await db_manager.initialize()
 
+    # Initialize Docker executor
+    await docker_executor.initialize()
+    
     # Start cleanup service
     await cleanup_service.start()
 
@@ -34,6 +38,7 @@ async def lifespan(app: FastAPI):
     # Cleanup
     logger.info("Shutting down application")
     await cleanup_service.stop()
+    await docker_executor.close()
     await db_manager.close()
 
 

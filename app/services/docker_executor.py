@@ -3,7 +3,7 @@ from loguru import logger
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 import time
-from docker.errors import APIError
+from docker.errors import APIError, ImageNotFound
 import asyncio
 import contextlib
 import fcntl
@@ -41,7 +41,32 @@ class DockerExecutor:
         self._container_semaphore = asyncio.Semaphore(self.MAX_CONCURRENT_CONTAINERS)
         self._active_containers: Dict[str, ContainerMetrics] = {}
         self._lock = asyncio.Lock()
-        self._docker = None  # Will be initialized in execute()
+        self._docker = None  # Will be initialized in initialize()
+        self._image_pull_locks: Dict[str, asyncio.Lock] = {}  # Locks for image pulling
+
+    async def initialize(self):
+        """Initialize the Docker client."""
+        try:
+            if self._docker is None:
+                self._docker = aiodocker.Docker()
+            else:
+                # Check if the client is still valid
+                if not await self._validate_docker_connection():
+                    # Reinitialize if there was an error
+                    await self.close()
+                    self._docker = aiodocker.Docker()
+            
+            logger.info("Docker client initialized successfully")
+            return self
+        except Exception as e:
+            logger.error(f"Error initializing Docker client: {str(e)}")
+            raise
+
+    async def close(self):
+        """Close the Docker client."""
+        if self._docker is not None:
+            await self._docker.close()
+            self._docker = None
 
     @contextlib.contextmanager
     def _file_lock(self, path: Path):
@@ -135,159 +160,222 @@ class DockerExecutor:
         """Execute code in a Docker container with file management."""
         container = None
 
-        if self._docker is None:
-            self._docker = aiodocker.Docker()
+        try:
+            # Ensure Docker client is initialized and valid
+            if self._docker is None:
+                await self.initialize()
+            else:
+                # Verify Docker client is still valid
+                if not await self._validate_docker_connection():
+                    logger.warning("Docker client validation failed, reinitializing")
+                    await self.close()
+                    await self.initialize()
 
-        # Create session directory before anything else
-        session_path: Path = UPLOAD_PATH / session_id
-        logger.info(f"Session path: {session_path}")
-        session_path.mkdir(parents=True, exist_ok=True)
-        # Log debug information
-        logger.info(f"Session directory: {session_path}")
-        logger.info(f"Session directory contents: {list(session_path.glob('*'))}")
-        logger.info(f"Code to execute: {code}")
+            # Create session directory before anything else
+            session_path: Path = UPLOAD_PATH / session_id
+            logger.info(f"Session path: {session_path}")
+            session_path.mkdir(parents=True, exist_ok=True)
+            # Log debug information
+            logger.info(f"Session directory: {session_path}")
+            logger.info(f"Session directory contents: {list(session_path.glob('*'))}")
+            logger.info(f"Code to execute: {code}")
 
-        async with self._container_semaphore:  # Limit concurrent containers
-            try:
-                # Create container config
-                config = {
-                    "Image": "jupyter/scipy-notebook:latest",
-                    "Cmd": ["sleep", "infinity"],
-                    "WorkingDir": self.WORK_DIR,
-                    "NetworkDisabled": True,
-                    "HostConfig": {
-                        "Memory": 512 * 1024 * 1024,  # 512MB in bytes
-                        "Mounts": [
-                            {
-                                "Type": "bind",
-                                "Source": str(settings.HOST_FILE_UPLOAD_PATH_ABS / session_id),
-                                "Target": self.DATA_MOUNT,
-                            }
-                        ],
-                    },
-                }
-
-                # Create and start container
-                container = await self._docker.containers.create(config=config)
-                await container.start()
-
-                # Track container metrics
-                async with self._lock:
-                    self._active_containers[container.id] = ContainerMetrics(
-                        start_time=datetime.now(), container_id=container.id
-                    )
-
-                # Start metrics monitoring
-                asyncio.create_task(self._update_container_metrics(container))
-
-                # Wait for container to be running
-                start_time = time.time()
-                while True:
-                    info = await container.show()
-                    if info["State"]["Running"]:
-                        break
-                    if time.time() - start_time > 10:
-                        raise RuntimeError("Container failed to start properly")
-                    await asyncio.sleep(0.1)
-
-                # Fix permissions for mounted directory
-                exec = await container.exec(
-                    cmd=["chown", "-R", "jovyan:users", self.DATA_MOUNT], user="root", stdout=True, stderr=True
-                )
-                # Use raw API call to get output
-                exec_url = f"exec/{exec._id}/start"
-                async with self._docker._query(
-                    exec_url,
-                    method="POST",
-                    headers={"Content-Type": "application/json"},
-                    data=json.dumps({"Detach": False, "Tty": False}),
-                ) as response:
-                    output = await response.read()
-                    output_text = self._clean_output(output)
-
-                # Execute the Python code as jovyan user
-                exec = await container.exec(cmd=["python", "-c", code], user="jovyan", stdout=True, stderr=True)
-                # Use raw API call to get output
-                exec_url = f"exec/{exec._id}/start"
-                async with self._docker._query(
-                    exec_url,
-                    method="POST",
-                    headers={"Content-Type": "application/json"},
-                    data=json.dumps({"Detach": False, "Tty": False}),
-                ) as response:
-                    output = await response.read()
-                    output_text = self._clean_output(output)
-
-                # Check execution status
-                exec_inspect = await exec.inspect()
-                if exec_inspect["ExitCode"] != 0:
-                    return {"stdout": "", "stderr": output_text, "status": "error", "files": []}
-
-                # List files in the session directory
-                output_files = []
-                existing_filenames = {file["name"] for file in (files or [])}
-                logger.info(f"Existing filenames: {existing_filenames}")
-                logger.info(f"Scanning directory {session_path} for created files")
-                for file_path in session_path.glob("*"):
-                    if file_path.is_file() and file_path.name not in existing_filenames:
-                        file_id = generate_id()
-                        file_size = file_path.stat().st_size
-                        logger.info(f"Found new file: {file_path}, size: {file_size}")
-
-                        # Calculate file metadata
-                        content_type, _ = mimetypes.guess_type(file_path.name) or ("application/octet-stream", None)
-                        etag = hashlib.md5(str(file_path.stat().st_mtime).encode()).hexdigest()
-
-                        # Prepare file data for database
-                        file_data = {
-                            "id": file_id,
-                            "session_id": session_id,
-                            "filename": file_path.name,
-                            "filepath": session_id + "/" + file_path.name,
-                            "size": file_size,
-                            "content_type": content_type,
-                            "original_filename": file_path.name,
-                            "etag": etag,
-                            "name": f"{session_id}/{file_id}/{file_path.name}",
-                        }
-                        logger.info(f"Saving file metadata to database: {file_data}")
-
-                        # Save to database
-                        await db_manager.add_file(file_data)
-                        output_files.append(file_data)
-
-                return {
-                    "stdout": output_text,
-                    "stderr": "",
-                    "status": "ok",
-                    "files": output_files,
-                    "metrics": {
-                        "memory_usage": self._active_containers[container.id].memory_usage,
-                        "cpu_usage": self._active_containers[container.id].cpu_usage,
-                        "execution_time": (
-                            datetime.now() - self._active_containers[container.id].start_time
-                        ).total_seconds(),
-                    },
-                }
-
-            except Exception as e:
-                logger.error(f"Error in docker execution: {str(e)}")
-                return {
-                    "stdout": "",
-                    "stderr": "Failed to execute code. Please try again.",
-                    "status": "error",
-                    "files": [],
-                }
-
-            finally:
-                # Cleanup container and metrics
-                if container:
+            async with self._container_semaphore:
+                try:
+                    # Ensure the image is available
+                    image_name = settings.PYTHON_CONTAINER_IMAGE
+                    logger.info(f"Using container image: {image_name}")
+                    
                     try:
-                        await container.delete(force=True)
-                        async with self._lock:
-                            self._active_containers.pop(container.id, None)
+                        # Check if image exists
+                        await self._docker.images.inspect(image_name)
+                        logger.info(f"Image {image_name} is available")
                     except Exception as e:
-                        logger.error(f"Error removing container: {str(e)}")
+                        # Check if it's a 404 error (image not found)
+                        if isinstance(e, aiodocker.exceptions.DockerError) and e.status == 404:
+                            # Get or create a lock for this specific image
+                            if image_name not in self._image_pull_locks:
+                                self._image_pull_locks[image_name] = asyncio.Lock()
+                            
+                            # Acquire the lock for this image to prevent multiple pulls
+                            async with self._image_pull_locks[image_name]:
+                                # Check again if the image exists (another request might have pulled it while we were waiting)
+                                try:
+                                    await self._docker.images.inspect(image_name)
+                                    logger.info(f"Image {image_name} is now available (pulled by another request)")
+                                except Exception as check_again_error:
+                                    if isinstance(check_again_error, aiodocker.exceptions.DockerError) and check_again_error.status == 404:
+                                        # Pull the image if not available
+                                        logger.info(f"Image {image_name} not found, pulling...")
+                                        try:
+                                            # Pull using aiodocker
+                                            await self._docker.images.pull(image_name)
+                                            logger.info(f"Successfully pulled image {image_name}")
+                                        except Exception as pull_error:
+                                            logger.error(f"Failed to pull image: {str(pull_error)}")
+                                            return {
+                                                "stdout": "",
+                                                "stderr": f"Failed to pull required Docker image: {image_name}. Error: {str(pull_error)}",
+                                                "status": "error",
+                                                "files": [],
+                                            }
+                                    else:
+                                        # Re-raise if it's not a 404 error
+                                        logger.error(f"Error checking for image {image_name}: {str(check_again_error)}")
+                                        raise
+                        else:
+                            # Re-raise if it's not a 404 error
+                            logger.error(f"Error checking for image {image_name}: {str(e)}")
+                            raise
+                    
+                    # Create container config
+                    config = {
+                        "Image": image_name,
+                        "Cmd": ["sleep", "infinity"],
+                        "WorkingDir": self.WORK_DIR,
+                        "NetworkDisabled": True,
+                        "HostConfig": {
+                            "Memory": 512 * 1024 * 1024,  # 512MB in bytes
+                            "Mounts": [
+                                {
+                                    "Type": "bind",
+                                    "Source": str(settings.HOST_FILE_UPLOAD_PATH_ABS / session_id),
+                                    "Target": self.DATA_MOUNT,
+                                }
+                            ],
+                        },
+                    }
+
+                    # Create and start container
+                    container = await self._docker.containers.create(config=config)
+                    await container.start()
+
+                    # Track container metrics
+                    async with self._lock:
+                        self._active_containers[container.id] = ContainerMetrics(
+                            start_time=datetime.now(), container_id=container.id
+                        )
+
+                    # Start metrics monitoring
+                    asyncio.create_task(self._update_container_metrics(container))
+
+                    # Wait for container to be running
+                    start_time = time.time()
+                    while True:
+                        info = await container.show()
+                        if info["State"]["Running"]:
+                            break
+                        if time.time() - start_time > 10:
+                            raise RuntimeError("Container failed to start properly")
+                        await asyncio.sleep(0.1)
+
+                    # Fix permissions for mounted directory
+                    exec = await container.exec(
+                        cmd=["chown", "-R", "jovyan:users", self.DATA_MOUNT], user="root", stdout=True, stderr=True
+                    )
+                    # Use raw API call to get output
+                    exec_url = f"exec/{exec._id}/start"
+                    async with self._docker._query(
+                        exec_url,
+                        method="POST",
+                        headers={"Content-Type": "application/json"},
+                        data=json.dumps({"Detach": False, "Tty": False}),
+                    ) as response:
+                        output = await response.read()
+                        output_text = self._clean_output(output)
+
+                    # Execute the Python code as jovyan user
+                    exec = await container.exec(cmd=["python", "-c", code], user="jovyan", stdout=True, stderr=True)
+                    # Use raw API call to get output
+                    exec_url = f"exec/{exec._id}/start"
+                    async with self._docker._query(
+                        exec_url,
+                        method="POST",
+                        headers={"Content-Type": "application/json"},
+                        data=json.dumps({"Detach": False, "Tty": False}),
+                    ) as response:
+                        output = await response.read()
+                        output_text = self._clean_output(output)
+
+                    # Check execution status
+                    exec_inspect = await exec.inspect()
+                    if exec_inspect["ExitCode"] != 0:
+                        return {"stdout": "", "stderr": output_text, "status": "error", "files": []}
+
+                    # List files in the session directory
+                    output_files = []
+                    existing_filenames = {file["name"] for file in (files or [])}
+                    logger.info(f"Existing filenames: {existing_filenames}")
+                    logger.info(f"Scanning directory {session_path} for created files")
+                    for file_path in session_path.glob("*"):
+                        if file_path.is_file() and file_path.name not in existing_filenames:
+                            file_id = generate_id()
+                            file_size = file_path.stat().st_size
+                            logger.info(f"Found new file: {file_path}, size: {file_size}")
+
+                            # Calculate file metadata
+                            content_type, _ = mimetypes.guess_type(file_path.name) or ("application/octet-stream", None)
+                            etag = hashlib.md5(str(file_path.stat().st_mtime).encode()).hexdigest()
+
+                            # Prepare file data for database
+                            file_data = {
+                                "id": file_id,
+                                "session_id": session_id,
+                                "filename": file_path.name,
+                                "filepath": session_id + "/" + file_path.name,
+                                "size": file_size,
+                                "content_type": content_type,
+                                "original_filename": file_path.name,
+                                "etag": etag,
+                                "name": f"{session_id}/{file_id}/{file_path.name}",
+                            }
+                            logger.info(f"Saving file metadata to database: {file_data}")
+
+                            # Save to database
+                            await db_manager.add_file(file_data)
+                            output_files.append(file_data)
+
+                    return {
+                        "stdout": output_text,
+                        "stderr": "",
+                        "status": "ok",
+                        "files": output_files,
+                        "metrics": {
+                            "memory_usage": self._active_containers[container.id].memory_usage,
+                            "cpu_usage": self._active_containers[container.id].cpu_usage,
+                            "execution_time": (
+                                datetime.now() - self._active_containers[container.id].start_time
+                            ).total_seconds(),
+                        },
+                    }
+
+                except Exception as e:
+                    logger.error(f"Error in docker execution: {str(e)}")
+                    return {
+                        "stdout": "",
+                        "stderr": "Failed to execute code. Please try again.",
+                        "status": "error",
+                        "files": [],
+                    }
+
+                finally:
+                    # Cleanup container and metrics
+                    if container:
+                        try:
+                            await container.delete(force=True)
+                            async with self._lock:
+                                self._active_containers.pop(container.id, None)
+                        except Exception as e:
+                            logger.error(f"Error removing container: {str(e)}")
+
+        except Exception as e:
+            logger.error(f"Error in docker execution: {str(e)}")
+            return {
+                "stdout": "",
+                "stderr": "Failed to execute code. Please try again.",
+                "status": "error",
+                "files": [],
+            }
 
     async def get_active_containers(self) -> List[Dict[str, Any]]:
         """Get information about currently running containers."""
@@ -296,6 +384,18 @@ class DockerExecutor:
                 {"container_id": container_id, "metrics": metrics.__dict__}
                 for container_id, metrics in self._active_containers.items()
             ]
+
+    async def _validate_docker_connection(self):
+        """Validate that the Docker connection is working properly."""
+        try:
+            # Instead of using ping(), try to get the Docker version
+            # which is a simple API call that should work if the connection is valid
+            await self._docker.version()
+            logger.debug("Docker connection validated")
+            return True
+        except Exception as e:
+            logger.warning(f"Docker connection validation failed: {str(e)}")
+            return False
 
 
 # Create singleton instance

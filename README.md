@@ -10,7 +10,8 @@ A FastAPI-based code interpreter service that provides code execution and file m
 ## Features
 
 - Easy deployment with single docker compose file
-- 
+- Code execution in Docker container sandbox
+- File upload and download
 - Multi-user support
 - RESTful API with OpenAPI documentation
 
@@ -22,7 +23,7 @@ A FastAPI-based code interpreter service that provides code execution and file m
 
 Run the project with docker compose using `docker compose -f compose.prod.yml up`
 
-It's possible to overwrite the default environment variables defined in ./app/shared/config.py by creating a `.env` file in the root directory.
+It's possible to overwrite the default environment variables defined in [./app/shared/config.py](./app/shared/config.py) by creating a `.env` file in the root directory.
 By default the project will create two directories in the root directory: `./config` and `./uploads`.
 
 `config` directory will hold the sqlite database and temp uploaded files.

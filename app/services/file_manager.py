@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from ..shared.config import get_settings
 from .database import db_manager
 from app.utils.generate_id import generate_id
-
+from app.shared.const import UPLOAD_PATH
 settings = get_settings()
 
 
@@ -17,7 +17,7 @@ class FileManager:
     """Manages file operations for code interpreter sessions."""
 
     def __init__(self):
-        self.upload_path = Path("/app/uploads")
+        self.upload_path = UPLOAD_PATH
         self.upload_path.mkdir(parents=True, exist_ok=True)
         self._mime = magic.Magic(mime=True)
 

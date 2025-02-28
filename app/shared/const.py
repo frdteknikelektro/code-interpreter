@@ -1,5 +1,9 @@
 from pathlib import Path
+import os
 
+# Get the current working directory or use environment variable if set
+HOST_PATH = Path(os.environ.get("HOST_PATH", os.getcwd()))
 
-UPLOAD_PATH = Path('/app/uploads')
-CONFIG_PATH = Path('/app/config')
+# Use relative paths that will be resolved at runtime
+UPLOAD_PATH = Path("uploads")
+CONFIG_PATH = Path("config")
