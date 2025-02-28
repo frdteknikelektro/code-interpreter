@@ -45,7 +45,7 @@ async def lifespan(app: FastAPI):
 # Create FastAPI application
 app = FastAPI(
     title="Code Interpreter API",
-    description="API for executing Python code in a secure environment",
+    description="API for executing Python and R code in a sandboxed environment",
     version="1.0.0",
     lifespan=lifespan,
 )

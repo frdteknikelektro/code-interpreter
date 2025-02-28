@@ -1,7 +1,7 @@
 import docker
 from loguru import logger
 from pathlib import Path
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Literal
 import time
 from docker.errors import APIError, ImageNotFound
 import asyncio
@@ -35,14 +35,29 @@ class DockerExecutor:
 
     WORK_DIR = "/mnt/data"  # Working directory will be the same as data mount point
     DATA_MOUNT = "/mnt/data"  # Mount point for session data
-    MAX_CONCURRENT_CONTAINERS = 10
+    
+    # Language-specific execution commands
+    LANGUAGE_EXECUTORS = {
+        "py": ["python", "-c"],
+        "r": ["Rscript", "-e"],
+    }
+    
+    # Language-specific messages
+    LANGUAGE_SPECIFIC_MESSAGES = {
+        "py": {
+            "empty_output": "Empty. Make sure to explicitly print() the results in Python"
+        },
+        "r": {
+            "empty_output": "Empty. Make sure to use print() or cat() to display results in R"
+        }
+    }
 
     def __init__(self):
-        self._container_semaphore = asyncio.Semaphore(self.MAX_CONCURRENT_CONTAINERS)
+        self._container_semaphore = asyncio.Semaphore(settings.MAX_CONCURRENT_CONTAINERS)
         self._active_containers: Dict[str, ContainerMetrics] = {}
         self._lock = asyncio.Lock()
         self._docker = None  # Will be initialized in initialize()
-        self._image_pull_locks: Dict[str, asyncio.Lock] = {}  # Locks for image pulling
+        self._image_pull_locks: Dict[str, asyncio.Lock] = {}
 
     async def initialize(self):
         """Initialize the Docker client."""
@@ -55,7 +70,7 @@ class DockerExecutor:
                     # Reinitialize if there was an error
                     await self.close()
                     self._docker = aiodocker.Docker()
-            
+
             logger.info("Docker client initialized successfully")
             return self
         except Exception as e:
@@ -155,7 +170,12 @@ class DockerExecutor:
         return b"".join(output_parts).decode("utf-8").strip()
 
     async def execute(
-        self, code: str, session_id: str, files: Optional[List[Dict[str, Any]]] = None, timeout: int = 30
+        self,
+        code: str,
+        session_id: str,
+        lang: Literal["py", "r"],
+        files: Optional[List[Dict[str, Any]]] = None,
+        timeout: int = 30,
     ) -> Dict[str, Any]:
         """Execute code in a Docker container with file management."""
         container = None
@@ -183,9 +203,9 @@ class DockerExecutor:
             async with self._container_semaphore:
                 try:
                     # Ensure the image is available
-                    image_name = settings.PYTHON_CONTAINER_IMAGE
+                    image_name = settings.LANGUAGE_CONTAINERS.get(lang)
                     logger.info(f"Using container image: {image_name}")
-                    
+
                     try:
                         # Check if image exists
                         await self._docker.images.inspect(image_name)
@@ -196,7 +216,7 @@ class DockerExecutor:
                             # Get or create a lock for this specific image
                             if image_name not in self._image_pull_locks:
                                 self._image_pull_locks[image_name] = asyncio.Lock()
-                            
+
                             # Acquire the lock for this image to prevent multiple pulls
                             async with self._image_pull_locks[image_name]:
                                 # Check again if the image exists (another request might have pulled it while we were waiting)
@@ -204,7 +224,10 @@ class DockerExecutor:
                                     await self._docker.images.inspect(image_name)
                                     logger.info(f"Image {image_name} is now available (pulled by another request)")
                                 except Exception as check_again_error:
-                                    if isinstance(check_again_error, aiodocker.exceptions.DockerError) and check_again_error.status == 404:
+                                    if (
+                                        isinstance(check_again_error, aiodocker.exceptions.DockerError)
+                                        and check_again_error.status == 404
+                                    ):
                                         # Pull the image if not available
                                         logger.info(f"Image {image_name} not found, pulling...")
                                         try:
@@ -227,7 +250,7 @@ class DockerExecutor:
                             # Re-raise if it's not a 404 error
                             logger.error(f"Error checking for image {image_name}: {str(e)}")
                             raise
-                    
+
                     # Create container config
                     config = {
                         "Image": image_name,
@@ -284,8 +307,16 @@ class DockerExecutor:
                         output = await response.read()
                         output_text = self._clean_output(output)
 
-                    # Execute the Python code as jovyan user
-                    exec = await container.exec(cmd=["python", "-c", code], user="jovyan", stdout=True, stderr=True)
+                    # Execute the code with the appropriate interpreter
+                    logger.info(f"Code to execute: {code}")
+                    logger.info(f"Language: {lang}")
+                    
+                    # Get the execution command for the specified language
+                    exec_cmd = self.LANGUAGE_EXECUTORS.get(lang, self.LANGUAGE_EXECUTORS["py"])
+                    logger.info(f"Using execution command: {exec_cmd}")
+                    
+                    # Execute the code with the appropriate interpreter
+                    exec = await container.exec(cmd=[*exec_cmd, code], user="jovyan", stdout=True, stderr=True)
                     # Use raw API call to get output
                     exec_url = f"exec/{exec._id}/start"
                     async with self._docker._query(

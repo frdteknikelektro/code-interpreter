@@ -10,14 +10,13 @@ A FastAPI-based code interpreter service that provides code execution and file m
 ## Features
 
 - Easy deployment with single docker compose file
-- Code execution in Docker container sandbox
-- File upload and download
-- Multi-user support
+- Code is executed in a isolated Docker container sandbox, custom images supported
+- Supports file upload and download
+- Supports concurrent code execution
+- Supports Python and R languages (possibility to extend to other languages)
 - RESTful API with OpenAPI documentation
 
-
 ## Usage
-
 
 ### Running the project
 

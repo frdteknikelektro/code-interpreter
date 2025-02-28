@@ -32,7 +32,7 @@ class CodeExecutionRequest(BaseModel):
     lang: str = Field(
         ...,
         description="The programming language of the code",
-        examples=["py"],
+        examples=["py", "r"],
         pattern="^(c|cpp|d|f90|go|java|js|php|py|rs|ts|r)$",
     )
     args: Optional[List[str]] = Field(None, description="Optional command line arguments to pass to the program")

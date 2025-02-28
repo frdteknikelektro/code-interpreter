@@ -30,7 +30,7 @@ router = APIRouter(prefix=settings.API_PREFIX)
 # Initialize services
 file_manager = FileManager()
 
-SUPPORTED_LANGUAGES = {"py"}  # Only Python is supported for now
+SUPPORTED_LANGUAGES = {"py", "r"}  # Python and R are supported
 MAX_RETRIES = 3
 
 
@@ -48,17 +48,25 @@ async def execute_code(
         CodeExecutionRequest,
         Body(
             openapi_examples={
-                "Hello World": {
-                    "summary": "Hello World",
+                "Hello World (Python)": {
+                    "summary": "Hello World in Python",
                     "value": {"code": "print('Hello, world!')", "lang": "py"},
                 },
-                "Random Number": {
-                    "summary": "Random Number",
+                "Random Number (Python)": {
+                    "summary": "Random Number in Python",
                     "value": {"code": "import random; print(random.randint(1, 100))", "lang": "py"},
                 },
-                "Sleep": {
+                "Sleep (Python)": {
                     "summary": "Sleep",
                     "value": {"code": "import time; time.sleep(10); print('Done sleeping')", "lang": "py"},
+                },
+                "Hello World (R)": {
+                    "summary": "Hello World in R",
+                    "value": {"code": "cat('Hello, world!')", "lang": "r"},
+                },
+                "Random Number (R)": {
+                    "summary": "Random Number in R",
+                    "value": {"code": "cat(sample(1:100, 1))", "lang": "r"},
                 },
             }
         ),
@@ -69,7 +77,7 @@ async def execute_code(
 
     if request.lang not in SUPPORTED_LANGUAGES:
         raise BadLanguageException(  # noqa: F821
-            message=f"Language '{request.lang}' is not supported. Please use Python ('py')."
+            message=f"Language '{request.lang}' is not supported. Please use Python ('py') or R ('r')."
         )
 
     try:
@@ -90,22 +98,40 @@ async def execute_code(
 
         # Execute code in Docker container
         result = await docker_executor.execute(
-            code=request.code, session_id=session_id, files=files, timeout=settings.SANDBOX_MAX_EXECUTION_TIME
+            code=request.code,
+            session_id=session_id,
+            lang=request.lang,
+            files=files,
+            timeout=settings.SANDBOX_MAX_EXECUTION_TIME,
         )
 
-        # Add a more Python specific error message if the stdout is empty (i.e. the code didn't print anything)
+        # Add a language-specific error message if the stdout is empty
         if not result.get("stdout"):
-            result["stdout"] = "Empty. Make sure to explicitly print the results"
+            if request.lang == "py":
+                result["stdout"] = "Empty. Make sure to explicitly print the results in Python"
+            elif request.lang == "r":
+                result["stdout"] = "Empty. Make sure to use print() or cat() to display results in R"
+            else:
+                result["stdout"] = "Empty. Make sure to explicitly output the results"
 
         # Convert output files to FileRef model
         output_files = [
             FileRef(id=file["id"], name=file["filename"], path=file["filepath"]) for file in result.get("files", [])
         ]
 
+        # Get language-specific version information
+        version_info = ""
+        if request.lang == "py":
+            version_info = f"Python {sys.version.split()[0]}"
+        elif request.lang == "r":
+            version_info = "R (Jupyter R-notebook)"
+        else:
+            version_info = f"Unknown language: {request.lang}"
+
         response = CodeExecutionResponse(
             run=result,
             language=request.lang,
-            version=f"Python {sys.version.split()[0]}",
+            version=version_info,
             session_id=session_id,
             files=output_files,
         )
@@ -121,7 +147,7 @@ async def execute_code(
                         "status": result.get("status"),
                     },
                     "language": request.lang,
-                    "version": f"Python {sys.version.split()[0]}",
+                    "version": version_info,
                     "session_id": session_id,
                     "files": [f.model_dump() for f in output_files],
                 }

@@ -12,7 +12,7 @@ All endpoints are prefixed with `/v1/librechat`
 ### 1. Execute Code
 **Endpoint:** `POST /exec`
 
-**Description:** Execute Python code in a secure sandbox environment
+**Description:** Execute Python and R code in a sandboxed environment
 
 **Request Body:**
 ```json

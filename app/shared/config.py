@@ -2,7 +2,7 @@ from loguru import logger
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from functools import lru_cache
 from pathlib import Path
-from typing import Set
+from typing import Dict, Set
 
 
 class Settings(BaseSettings):
@@ -84,7 +84,19 @@ class Settings(BaseSettings):
     CLEANUP_RUN_INTERVAL: int = 3600  # How often to run the cleanup in seconds
     CLEANUP_FILE_MAX_AGE: int = 86400  # How old files can be before they are deleted in seconds
 
-    PYTHON_CONTAINER_IMAGE: str = "jupyter/scipy-notebook:latest"
+    PY_CONTAINER_IMAGE: str = "jupyter/scipy-notebook:latest"
+    R_CONTAINER_IMAGE: str = "jupyter/r-notebook:latest"
+
+    @property
+    def LANGUAGE_CONTAINERS(self) -> Dict[str, str]:
+        """Map language codes to container images."""
+        return {
+            "py": self.PY_CONTAINER_IMAGE,
+            "r": self.R_CONTAINER_IMAGE,
+        }
+
+    # Docker execution settings
+    MAX_CONCURRENT_CONTAINERS: int = 10  # Maximum number of concurrent Docker containers
 
 
 @lru_cache()

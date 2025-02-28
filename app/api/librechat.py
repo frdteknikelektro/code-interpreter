@@ -47,21 +47,21 @@ def create_error_response(status_code: int, message: str) -> JSONResponse:
     "/exec",
     responses={400: {"model": LibreChatError}, 500: {"model": LibreChatError}},
     response_model=LibreChatExecuteResponse,
-    description="Execute Python code in a secure sandbox environment",
-    summary="Execute Python code",
+    description="Execute Python or R code in a sandboxed environment",
+    summary="Execute code",
     response_description="Returns the execution results",
 )
 async def execute_code(request: CodeExecutionRequest) -> LibreChatExecuteResponse:
-    """Execute Python code in a secure sandbox environment.
+    """Execute code in a sandboxed environment.
 
     This endpoint handles code execution requests from LibreChat. It processes the provided
-    Python code in an isolated environment and returns the execution results.
+    code in an isolated environment and returns the execution results.
 
     Args:
         request (CodeExecutionRequest): Request object containing:
-            - code: Python code to execute
+            - code: Code to execute
             - files: Optional list of files needed for execution
-            - language: Programming language (must be 'python')
+            - language: Programming language ('py' for Python or 'r' for R)
             - stdin: Optional standard input for the code
 
     Returns:

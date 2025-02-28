@@ -11,11 +11,12 @@ from fastapi.testclient import TestClient
 from app.main import app
 from loguru import logger
 
-
+# We log to a file to avoid polluting the console with logs
 logger.remove()
 logs_path = Path("logs/test.log")
 logs_path.parent.mkdir(exist_ok=True, parents=True)
-# logs_path.unlink(missing_ok=True)
+# Clear logs from previous runs
+logs_path.unlink(missing_ok=True)
 logger.add(logs_path)
 
 
