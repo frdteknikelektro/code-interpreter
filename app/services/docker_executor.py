@@ -1,7 +1,7 @@
 import docker
 from loguru import logger
 from pathlib import Path
-from typing import Dict, List, Optional, Any, Literal
+from typing import Dict, List, Optional, Any, Literal, Set, Tuple
 import time
 from docker.errors import APIError, ImageNotFound
 import asyncio
@@ -15,6 +15,7 @@ from app.shared.const import UPLOAD_PATH
 from app.utils.generate_id import generate_id
 import aiodocker
 import json
+import os
 
 from ..shared.config import get_settings
 from .database import db_manager
@@ -28,6 +29,16 @@ class ContainerMetrics:
     container_id: str
     memory_usage: int = 0
     cpu_usage: float = 0.0
+
+
+@dataclass
+class FileState:
+    """Tracks the state of a file for change detection."""
+    path: Path
+    size: int
+    mtime: float
+    md5_hash: str
+    exists: bool = True
 
 
 class DockerExecutor:
@@ -95,6 +106,94 @@ class DockerExecutor:
             fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
             lock_file.close()
             lock_path.unlink(missing_ok=True)
+
+    def _scan_directory(self, directory: Path) -> Dict[str, FileState]:
+        """
+        Recursively scan a directory and collect file states.
+        Returns a dictionary mapping relative file paths to their FileState objects.
+        """
+        file_states = {}
+        
+        if not directory.exists():
+            logger.warning(f"Directory {directory} does not exist")
+            return file_states
+            
+        # Walk through the directory recursively
+        for root, _, files in os.walk(directory):
+            root_path = Path(root)
+            
+            # Compute relative path from the base directory
+            rel_root = root_path.relative_to(directory)
+            
+            for filename in files:
+                # Skip lock files
+                if filename.endswith('.lock'):
+                    continue
+                    
+                file_path = root_path / filename
+                
+                # Compute relative path for dictionary key
+                if rel_root == Path('.'):
+                    rel_path = filename
+                else:
+                    rel_path = str(rel_root / filename)
+                
+                try:
+                    # Get file stats
+                    stat = file_path.stat()
+                    size = stat.st_size
+                    mtime = stat.st_mtime
+                    
+                    # Calculate MD5 hash for content comparison
+                    md5_hash = hashlib.md5(file_path.read_bytes()).hexdigest()
+                    
+                    # Store file state
+                    file_states[rel_path] = FileState(
+                        path=file_path,
+                        size=size,
+                        mtime=mtime,
+                        md5_hash=md5_hash
+                    )
+                    logger.debug(f"Scanned file: {rel_path}, size: {size}, hash: {md5_hash}")
+                except (PermissionError, FileNotFoundError) as e:
+                    logger.warning(f"Error scanning file {file_path}: {str(e)}")
+                    continue
+        
+        return file_states
+
+    def _find_changed_files(self, 
+                           before_states: Dict[str, FileState], 
+                           after_states: Dict[str, FileState]) -> Set[str]:
+        """
+        Compare before and after file states to identify new or modified files.
+        Returns a set of relative paths of changed files.
+        """
+        changed_files = set()
+        
+        # Find new or modified files
+        for rel_path, after_state in after_states.items():
+            if rel_path not in before_states:
+                # New file
+                logger.info(f"New file detected: {rel_path}")
+                changed_files.add(rel_path)
+            else:
+                before_state = before_states[rel_path]
+                # Check if file was modified (size, hash, or timestamp changed)
+                if (before_state.size != after_state.size or 
+                    before_state.md5_hash != after_state.md5_hash):
+                    logger.info(f"Modified file detected: {rel_path}, before={before_state.size}:{before_state.md5_hash}, after={after_state.size}:{after_state.md5_hash}")
+                    changed_files.add(rel_path)
+                else:
+                    logger.info(f"Unchanged file: {rel_path}, size={after_state.size}, hash={after_state.md5_hash}")
+        
+        # Add debug logs for summarizing scan results
+        for rel_path in before_states:
+            if rel_path not in after_states:
+                logger.info(f"File deleted: {rel_path}")
+                
+        logger.info(f"Before scan: {len(before_states)} files, After scan: {len(after_states)} files, Changed: {len(changed_files)} files")
+        
+        return changed_files
 
     async def _update_container_metrics(self, container) -> None:
         """Update metrics for a running container."""
@@ -199,6 +298,11 @@ class DockerExecutor:
             logger.info(f"Session directory: {session_path}")
             logger.info(f"Session directory contents: {list(session_path.glob('*'))}")
             logger.info(f"Code to execute: {code}")
+
+            # Scan directory before execution to track file state
+            logger.info(f"Scanning directory {session_path} before code execution")
+            before_file_states = self._scan_directory(session_path)
+            logger.info(f"Found {len(before_file_states)} files before execution")
 
             async with self._container_semaphore:
                 try:
@@ -333,32 +437,46 @@ class DockerExecutor:
                     if exec_inspect["ExitCode"] != 0:
                         return {"stdout": "", "stderr": output_text, "status": "error", "files": []}
 
-                    # List files in the session directory
+                    # Scan directory after execution to detect changes
+                    logger.info(f"Scanning directory {session_path} after code execution")
+                    after_file_states = self._scan_directory(session_path)
+                    logger.info(f"Found {len(after_file_states)} files after execution")
+
+                    # Identify changed files
+                    changed_file_paths = self._find_changed_files(before_file_states, after_file_states)
+                    logger.info(f"Detected {len(changed_file_paths)} changed files: {changed_file_paths}")
+
+                    # Process only new or modified files
                     output_files = []
                     existing_filenames = {file["name"] for file in (files or [])}
                     logger.info(f"Existing filenames: {existing_filenames}")
-                    logger.info(f"Scanning directory {session_path} for created files")
-                    for file_path in session_path.glob("*"):
-                        if file_path.is_file() and file_path.name not in existing_filenames:
+                    
+                    for rel_path in changed_file_paths:
+                        file_path = session_path / rel_path
+                        if file_path.is_file():
                             file_id = generate_id()
                             file_size = file_path.stat().st_size
-                            logger.info(f"Found new file: {file_path}, size: {file_size}")
+                            logger.info(f"Processing changed file: {file_path}, size: {file_size}")
 
                             # Calculate file metadata
                             content_type, _ = mimetypes.guess_type(file_path.name) or ("application/octet-stream", None)
                             etag = hashlib.md5(str(file_path.stat().st_mtime).encode()).hexdigest()
 
                             # Prepare file data for database
+                            # Use directory structure in filepath if present
+                            filepath = f"{session_id}/{rel_path}"
+                            filename = Path(rel_path).name
+                            
                             file_data = {
                                 "id": file_id,
                                 "session_id": session_id,
-                                "filename": file_path.name,
-                                "filepath": session_id + "/" + file_path.name,
+                                "filename": filename,  # This is used by the API to convert to FileRef.name
+                                "filepath": filepath,
                                 "size": file_size,
                                 "content_type": content_type,
-                                "original_filename": file_path.name,
+                                "original_filename": filename,
                                 "etag": etag,
-                                "name": f"{session_id}/{file_id}/{file_path.name}",
+                                "name": f"{session_id}/{file_id}/{filename}",  # Full path for storage/reference
                             }
                             logger.info(f"Saving file metadata to database: {file_data}")
 

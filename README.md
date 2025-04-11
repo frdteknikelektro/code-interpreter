@@ -35,7 +35,7 @@ LibreChat is configured to use the code interpreter API by default.
 To configure LibreChat to use the local code interpreter, set the following environment variables in LibreChat:
 
 ```ini
-# LIBRECHAT_CODE_API_KEY=... currently not needed
+LIBRECHAT_CODE_API_KEY=<any-value-here>
 LIBRECHAT_CODE_BASEURL=http(s)://host:port/v1/librechat # for local testing use to point to host IP http://host.docker.internal:8000/v1/librechat
 ```
 
