@@ -16,6 +16,8 @@ A FastAPI-based code interpreter service that provides code execution and file m
 - Supports Python and R languages (possibility to extend to other languages)
 - RESTful API with OpenAPI documentation
 
+https://github.com/user-attachments/assets/ca74549e-0e32-4659-81a8-158ee9132738
+
 ## Usage
 
 ### Running the project
