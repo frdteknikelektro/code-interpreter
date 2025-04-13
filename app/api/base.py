@@ -97,13 +97,7 @@ async def execute_code(
                     continue
 
         # Execute code in Docker container
-        result = await docker_executor.execute(
-            code=request.code,
-            session_id=session_id,
-            lang=request.lang,
-            files=files,
-            timeout=settings.SANDBOX_MAX_EXECUTION_TIME,
-        )
+        result = await docker_executor.execute(code=request.code, session_id=session_id, lang=request.lang, files=files)
 
         # Add a language-specific error message if the stdout is empty
         if not result.get("stdout"):

@@ -97,6 +97,11 @@ class Settings(BaseSettings):
 
     # Docker execution settings
     MAX_CONCURRENT_CONTAINERS: int = 10  # Maximum number of concurrent Docker containers
+    CONTAINER_MEMORY_LIMIT_MB: int = 512  # Memory limit for Docker containers in MB
+    CONTAINER_CPU_LIMIT: float = 1.0  # CPU limit for Docker containers (number of cores)
+
+    # Docker network settings
+    DOCKER_NETWORK_ENABLED: bool = False  # Whether Docker containers have network access
 
 
 @lru_cache()

@@ -34,6 +34,7 @@ class ContainerMetrics:
 @dataclass
 class FileState:
     """Tracks the state of a file for change detection."""
+
     path: Path
     size: int
     mtime: float
@@ -46,21 +47,17 @@ class DockerExecutor:
 
     WORK_DIR = "/mnt/data"  # Working directory will be the same as data mount point
     DATA_MOUNT = "/mnt/data"  # Mount point for session data
-    
+
     # Language-specific execution commands
     LANGUAGE_EXECUTORS = {
         "py": ["python", "-c"],
         "r": ["Rscript", "-e"],
     }
-    
+
     # Language-specific messages
     LANGUAGE_SPECIFIC_MESSAGES = {
-        "py": {
-            "empty_output": "Empty. Make sure to explicitly print() the results in Python"
-        },
-        "r": {
-            "empty_output": "Empty. Make sure to use print() or cat() to display results in R"
-        }
+        "py": {"empty_output": "Empty. Make sure to explicitly print() the results in Python"},
+        "r": {"empty_output": "Empty. Make sure to use print() or cat() to display results in R"},
     }
 
     def __init__(self):
@@ -113,63 +110,56 @@ class DockerExecutor:
         Returns a dictionary mapping relative file paths to their FileState objects.
         """
         file_states = {}
-        
+
         if not directory.exists():
             logger.warning(f"Directory {directory} does not exist")
             return file_states
-            
+
         # Walk through the directory recursively
         for root, _, files in os.walk(directory):
             root_path = Path(root)
-            
+
             # Compute relative path from the base directory
             rel_root = root_path.relative_to(directory)
-            
+
             for filename in files:
                 # Skip lock files
-                if filename.endswith('.lock'):
+                if filename.endswith(".lock"):
                     continue
-                    
+
                 file_path = root_path / filename
-                
+
                 # Compute relative path for dictionary key
-                if rel_root == Path('.'):
+                if rel_root == Path("."):
                     rel_path = filename
                 else:
                     rel_path = str(rel_root / filename)
-                
+
                 try:
                     # Get file stats
                     stat = file_path.stat()
                     size = stat.st_size
                     mtime = stat.st_mtime
-                    
+
                     # Calculate MD5 hash for content comparison
                     md5_hash = hashlib.md5(file_path.read_bytes()).hexdigest()
-                    
+
                     # Store file state
-                    file_states[rel_path] = FileState(
-                        path=file_path,
-                        size=size,
-                        mtime=mtime,
-                        md5_hash=md5_hash
-                    )
+                    file_states[rel_path] = FileState(path=file_path, size=size, mtime=mtime, md5_hash=md5_hash)
                     logger.debug(f"Scanned file: {rel_path}, size: {size}, hash: {md5_hash}")
                 except (PermissionError, FileNotFoundError) as e:
                     logger.warning(f"Error scanning file {file_path}: {str(e)}")
                     continue
-        
+
         return file_states
 
-    def _find_changed_files(self, 
-                           before_states: Dict[str, FileState], 
-                           after_states: Dict[str, FileState]) -> Set[str]:
+    def _find_changed_files(self, before_states: Dict[str, FileState], after_states: Dict[str, FileState]) -> Set[str]:
         """
         Compare before and after file states to identify new or modified files.
         Returns a set of relative paths of changed files.
         """
         changed_files = set()
-        
+
         # Find new or modified files
         for rel_path, after_state in after_states.items():
             if rel_path not in before_states:
@@ -179,20 +169,23 @@ class DockerExecutor:
             else:
                 before_state = before_states[rel_path]
                 # Check if file was modified (size, hash, or timestamp changed)
-                if (before_state.size != after_state.size or 
-                    before_state.md5_hash != after_state.md5_hash):
-                    logger.info(f"Modified file detected: {rel_path}, before={before_state.size}:{before_state.md5_hash}, after={after_state.size}:{after_state.md5_hash}")
+                if before_state.size != after_state.size or before_state.md5_hash != after_state.md5_hash:
+                    logger.info(
+                        f"Modified file detected: {rel_path}, before={before_state.size}:{before_state.md5_hash}, after={after_state.size}:{after_state.md5_hash}"
+                    )
                     changed_files.add(rel_path)
                 else:
                     logger.info(f"Unchanged file: {rel_path}, size={after_state.size}, hash={after_state.md5_hash}")
-        
+
         # Add debug logs for summarizing scan results
         for rel_path in before_states:
             if rel_path not in after_states:
                 logger.info(f"File deleted: {rel_path}")
-                
-        logger.info(f"Before scan: {len(before_states)} files, After scan: {len(after_states)} files, Changed: {len(changed_files)} files")
-        
+
+        logger.info(
+            f"Before scan: {len(before_states)} files, After scan: {len(after_states)} files, Changed: {len(changed_files)} files"
+        )
+
         return changed_files
 
     async def _update_container_metrics(self, container) -> None:
@@ -274,10 +267,11 @@ class DockerExecutor:
         session_id: str,
         lang: Literal["py", "r"],
         files: Optional[List[Dict[str, Any]]] = None,
-        timeout: int = 30,
+        config: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Execute code in a Docker container with file management."""
         container = None
+        config = config or {}
 
         try:
             # Ensure Docker client is initialized and valid
@@ -355,14 +349,24 @@ class DockerExecutor:
                             logger.error(f"Error checking for image {image_name}: {str(e)}")
                             raise
 
+                    # Get container configuration, with provided config overriding settings
+                    memory_limit_mb = config.get("memory_limit_mb", settings.CONTAINER_MEMORY_LIMIT_MB)
+                    cpu_limit = config.get("cpu_limit", settings.CONTAINER_CPU_LIMIT)
+                    network_enabled = config.get("network_enabled", settings.DOCKER_NETWORK_ENABLED)
+
+                    logger.info(
+                        f"Container config - Memory: {memory_limit_mb}MB, CPU: {cpu_limit}, Network: {network_enabled}"
+                    )
+
                     # Create container config
                     config = {
                         "Image": image_name,
                         "Cmd": ["sleep", "infinity"],
                         "WorkingDir": self.WORK_DIR,
-                        "NetworkDisabled": True,
+                        "NetworkDisabled": not network_enabled,
                         "HostConfig": {
-                            "Memory": 512 * 1024 * 1024,  # 512MB in bytes
+                            "Memory": memory_limit_mb * 1024 * 1024,  # Convert MB to bytes
+                            "NanoCpus": int(cpu_limit * 1e9),  # Convert CPU cores to nano CPUs
                             "Mounts": [
                                 {
                                     "Type": "bind",
@@ -414,11 +418,11 @@ class DockerExecutor:
                     # Execute the code with the appropriate interpreter
                     logger.info(f"Code to execute: {code}")
                     logger.info(f"Language: {lang}")
-                    
+
                     # Get the execution command for the specified language
                     exec_cmd = self.LANGUAGE_EXECUTORS.get(lang, self.LANGUAGE_EXECUTORS["py"])
                     logger.info(f"Using execution command: {exec_cmd}")
-                    
+
                     # Execute the code with the appropriate interpreter
                     exec = await container.exec(cmd=[*exec_cmd, code], user="jovyan", stdout=True, stderr=True)
                     # Use raw API call to get output
@@ -450,7 +454,7 @@ class DockerExecutor:
                     output_files = []
                     existing_filenames = {file["name"] for file in (files or [])}
                     logger.info(f"Existing filenames: {existing_filenames}")
-                    
+
                     for rel_path in changed_file_paths:
                         file_path = session_path / rel_path
                         if file_path.is_file():
@@ -466,7 +470,7 @@ class DockerExecutor:
                             # Use directory structure in filepath if present
                             filepath = f"{session_id}/{rel_path}"
                             filename = Path(rel_path).name
-                            
+
                             file_data = {
                                 "id": file_id,
                                 "session_id": session_id,
