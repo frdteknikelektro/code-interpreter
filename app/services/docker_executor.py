@@ -169,13 +169,19 @@ class DockerExecutor:
             else:
                 before_state = before_states[rel_path]
                 # Check if file was modified (size, hash, or timestamp changed)
-                if before_state.size != after_state.size or before_state.md5_hash != after_state.md5_hash:
+                if (
+                    before_state.size != after_state.size
+                    or before_state.md5_hash != after_state.md5_hash
+                    or before_state.mtime != after_state.mtime
+                ):
                     logger.info(
-                        f"Modified file detected: {rel_path}, before={before_state.size}:{before_state.md5_hash}, after={after_state.size}:{after_state.md5_hash}"
+                        f"Modified file detected: {rel_path}, before={before_state.size}:{before_state.md5_hash}:{before_state.mtime}, after={after_state.size}:{after_state.md5_hash}:{after_state.mtime}"
                     )
                     changed_files.add(rel_path)
                 else:
-                    logger.info(f"Unchanged file: {rel_path}, size={after_state.size}, hash={after_state.md5_hash}")
+                    logger.info(
+                        f"Unchanged file: {rel_path}, size={after_state.size}, hash={after_state.md5_hash}, mtime={after_state.mtime}"
+                    )
 
         # Add debug logs for summarizing scan results
         for rel_path in before_states:
