@@ -7,7 +7,7 @@ services:
     container_name: code-interpreter
     restart: unless-stopped
     privileged: true
-    command: /app/.venv/bin/fastapi run app/main.py --host 0.0.0.0 --port 8000 --reload
+    command: /app/.venv/bin/fastapi run app/main.py --host 0.0.0.0 --port ${PORT:-8000} --reload
     env_file:
       - .env
     environment:
