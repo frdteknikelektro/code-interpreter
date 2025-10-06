@@ -167,11 +167,15 @@ async def execute_code(
 async def upload_files(
     files: List[UploadFile] = File(...),
     entity_id: Optional[str] = Form(None),
+    session_id: Optional[str] = Form(None),
 ):
     """Upload files for code execution."""
     try:
-        session_id = generate_id()
-        logger.info(f"Starting file upload for session: {session_id}")
+        if session_id:
+            logger.info(f"Continuing file upload for session: {session_id}")
+        else:
+            session_id = generate_id()
+            logger.info(f"Starting file upload for session: {session_id}")
         uploaded_files = []
 
         for upload_file in files:

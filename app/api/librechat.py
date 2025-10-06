@@ -110,6 +110,7 @@ async def upload_files(
     request: Request,
     file: UploadFile = File(...),
     entity_id: Optional[str] = Form(None),
+    session_id: Optional[str] = Form(None),
 ) -> JSONResponse:
     """Upload files for use in code execution.
 
@@ -120,6 +121,7 @@ async def upload_files(
         request (Request): The FastAPI request object containing metadata
         file (UploadFile): The file to be uploaded
         entity_id (Optional[str], optional): Unique identifier for the entity owning the file
+        session_id (Optional[str], optional): Existing session identifier to append the file to
 
     Returns:
         JSONResponse: Response containing:
@@ -144,7 +146,7 @@ async def upload_files(
 
         # Reset file pointer and prepare for upload
         file.file = BytesIO(content)
-        response = await base_upload_files(files=[file], entity_id=entity_id)
+        response = await base_upload_files(files=[file], entity_id=entity_id, session_id=session_id)
 
         if not response.files:
             return create_error_response(500, "File upload failed")
