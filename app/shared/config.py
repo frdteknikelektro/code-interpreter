@@ -70,7 +70,7 @@ class Settings(BaseSettings):
         "gif",
     }
 
-    HOST_FILE_UPLOAD_PATH: Path = Path("uploads")  # Base directory for uploaded files
+    HOST_FILE_UPLOAD_PATH: Path = Path("uploads").resolve()  # Base directory for uploaded files
 
     @property
     def HOST_FILE_UPLOAD_PATH_ABS(self) -> Path:
