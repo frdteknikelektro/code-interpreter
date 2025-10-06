@@ -1,11 +1,12 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 
 from app.shared.config import get_settings
 from app.services.docker_executor import docker_executor
+from app.api.dependencies import verify_api_key
 
 
 settings = get_settings()
-router = APIRouter(prefix=settings.API_PREFIX)
+router = APIRouter(prefix=settings.API_PREFIX, dependencies=[Depends(verify_api_key)])
 
 
 @router.get("/containers/active")

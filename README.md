@@ -25,6 +25,7 @@ https://github.com/user-attachments/assets/ca74549e-0e32-4659-81a8-158ee9132738
 Run the project with docker compose using `docker compose -f compose.prod.yml up`
 
 It's possible to overwrite the default environment variables defined in [./app/shared/config.py](./app/shared/config.py) by creating a `.env` file in the root directory.
+Set `API_KEY=<your-secret>` in `.env` and include the same value in the `X-Api-Key` header for every request under `/v1`.
 By default the project will create two directories in the root directory: `./config` and `./uploads`.
 
 `config` directory will hold the sqlite database and temp uploaded files.
@@ -67,4 +68,3 @@ The API will be available at `http://localhost:8000`. The OpenAPI documentation 
 ```bash
 pytest
 ```
-

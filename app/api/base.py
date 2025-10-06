@@ -1,4 +1,4 @@
-from fastapi import APIRouter, UploadFile, File, HTTPException, Path, Form
+from fastapi import APIRouter, UploadFile, File, HTTPException, Path, Form, Depends
 from fastapi.params import Body
 from fastapi.responses import StreamingResponse
 from typing import Annotated, List, Optional
@@ -7,6 +7,7 @@ from loguru import logger
 from io import BytesIO
 
 from app.api.exceptions import BadLanguageException
+from app.api.dependencies import verify_api_key
 
 from ..models.base import (
     ExecuteResponse as CodeExecutionResponse,
@@ -25,7 +26,7 @@ from ..shared.config import get_settings
 from app.utils.generate_id import generate_id
 
 settings = get_settings()
-router = APIRouter(prefix=settings.API_PREFIX)
+router = APIRouter(prefix=settings.API_PREFIX, dependencies=[Depends(verify_api_key)])
 
 # Initialize services
 file_manager = FileManager()

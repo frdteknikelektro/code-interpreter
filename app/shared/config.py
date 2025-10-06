@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     # API settings
     PORT: int = 8000  # Port exposed from the container
     API_PREFIX: str = "/v1"  # API prefix
+    API_KEY: str | None = None  # Shared secret used to authenticate API requests
 
     # Code execution sandbox settings
     SANDBOX_MAX_EXECUTION_TIME: int = 300  # Docker container execution time limit in seconds
