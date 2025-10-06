@@ -1,4 +1,4 @@
-from fastapi import APIRouter, UploadFile, File, HTTPException, Path, Form, Request
+from fastapi import APIRouter, UploadFile, File, HTTPException, Path, Form, Request, Depends
 from fastapi.responses import JSONResponse, StreamingResponse
 from typing import List, Optional
 from loguru import logger
@@ -25,9 +25,10 @@ from .base import (
     list_files as base_list_files,
     delete_file as base_delete_file,
 )
+from .dependencies import verify_api_key
 
 settings = get_settings()
-router = APIRouter(prefix=f"{settings.API_PREFIX}/librechat", tags=["librechat"])
+router = APIRouter(prefix=f"{settings.API_PREFIX}/librechat", tags=["librechat"], dependencies=[Depends(verify_api_key)])
 
 
 def create_error_response(status_code: int, message: str) -> JSONResponse:

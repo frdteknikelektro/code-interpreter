@@ -1,11 +1,15 @@
 from typing import Annotated
 
-from fastapi import Header, HTTPException, status
+from fastapi import HTTPException, Security, status
+from fastapi.security import APIKeyHeader
 
 from app.shared.config import get_settings
 
 
-async def verify_api_key(x_api_key: Annotated[str | None, Header(alias="X-Api-Key", convert_underscores=False)] = None) -> None:
+api_key_header = APIKeyHeader(name="X-Api-Key", auto_error=False)
+
+
+async def verify_api_key(x_api_key: Annotated[str | None, Security(api_key_header)] = None) -> None:
     """Ensure that the request provides the expected API key."""
     settings = get_settings()
     expected_key = settings.API_KEY
